@@ -1,0 +1,30 @@
+# SENITAL AI — Activity Recognition — dependencies.
+
+# RTMPose pose engine (accurate top-down keypoints via ONNX, CPU-friendly).
+rtmlib>=0.0.13
+onnxruntime>=1.16.0
+
+# YOLO object detector (draws the box on a held object; used by strict mode).
+# Needs a torch/torchvision build for your hardware (CPU wheels are fine):
+#   https://pytorch.org/get-started/locally/
+torch>=2.0.0
+torchvision>=0.15.0
+ultralytics>=8.0.0
+
+# Video / image I/O and drawing.
+opencv-python>=4.7.0,<4.11
+# numpy 1.x — pinned below 2.0 to match the tested build and avoid ABI conflicts.
+numpy>=1.23.0,<2.0
+
+# Bundled ffmpeg for the alert siren + browser-friendly H.264 output.
+imageio-ffmpeg>=0.4.9
+
+# Web UI.
+flask>=2.2.0
+
+# List connected cameras by name for the live-camera picker (Windows).
+pygrabber>=0.1
+
+# Network (IP / Ethernet) camera support: ONVIF stream URIs + LAN auto-discovery.
+onvif-zeep>=0.2.12
+wsdiscovery>=2.0

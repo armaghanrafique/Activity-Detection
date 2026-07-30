@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SENITAL AI — Activity Recognition</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="splash" id="splash">
+  <div class="splash-inner">
+    <h1 class="splash-title">SENITAL <span>AI</span></h1>
+    <div class="splash-sub">Activity Recognition</div>
+    <div class="splash-rule"></div>
+    <div class="splash-bar-wrap"><div class="splash-bar" id="splashBar"></div></div>
+    <div class="splash-note">Initializing workspace</div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="app-header">
+    <div class="app-brand">
+      <h1 class="app-title">SENITAL <span>AI</span></h1>
+      <div class="app-tag">Activity Recognition</div>
+    </div>
+    <div class="links" style="margin:0">
+      <a class="nav-link" href="/live">Live Camera</a>
+      <a class="nav-link" href="/network">Network Camera</a>
+    </div>
+  </div>
+
+  <div class="card" id="uploadCard">
+    <div class="section">Upload</div>
+    <div class="drop" id="drop">
+      <div class="drop-main">Drag and drop a video, or <b>browse</b></div>
+      <div class="drop-sub">MP4, MOV, AVI, MKV, WEBM</div>
+      <div class="file-name" id="fileName"></div>
+    </div>
+    <input type="file" id="fileInput" accept="video/*" class="hidden">
+
+    <div class="controls" style="margin-top:20px">
+      <div class="field">
+        <span class="lbl">Detection model</span>
+        <select id="weights">
+          <option value="rtmpose" selected>Balanced (fast)</option>
+          <option value="rtmpose-acc">Accurate</option>
+        </select>
+      </div>
+      <div class="field">
+        <span class="lbl">Processing interval</span>
+        <input type="number" id="every" value="3" min="1" max="10">
+      </div>
+      <div class="field">
+        <span class="lbl">Detection mode</span>
+        <select id="objMode">
+          <option value="0" selected>Pose only (no object needed)</option>
+          <option value="1">Require object in hand</option>
+        </select>
+      </div>
+      <div class="field">
+        <span class="lbl">Detection accuracy <b id="confVal">0.40</b></span>
+        <input type="range" id="conf" min="0.05" max="0.95" step="0.05" value="0.40">
+      </div>
+      <div class="field">
+        <span class="lbl">Object threshold <b id="objconfVal">0.15</b></span>
+        <input type="range" id="objconf" min="0.05" max="0.80" step="0.05" value="0.15">
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-block" id="goBtn" style="margin-top:22px" disabled>Analyze</button>
+  </div>
+
+  <div class="card hidden" id="progCard">
+    <div class="section">Processing</div>
+    <div class="bar"><i id="barFill"></i></div>
+    <div class="status" id="statusText">Uploading</div>
+  </div>
+
+  <div class="card hidden" id="resultCard">
+    <div class="section">Result</div>
+    <video id="player" controls playsinline></video>
+    <div class="legend">
+      <span><i class="dot" style="background:#dc2828"></i> Using phone</span>
+      <span><i class="dot" style="background:#f0783c"></i> Taking picture</span>
+      <span><i class="dot" style="background:#c83cc8"></i> Placing object</span>
+      <span><i class="dot" style="background:#3cb44b"></i> Person</span>
+      <span><i class="dot" style="background:#ffd700"></i> Detected object</span>
+    </div>
+    <div class="links">
+      <a id="dlLink" download>Download annotated video</a>
+      <a href="#" id="againLink">Process another video</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ---- welcome splash (once per session) ----
+  (function () {
+    var splash = document.getElementById('splash');
+    var bar = document.getElementById('splashBar');
+    if (sessionStorage.getItem('sentinel_entered')) { splash.remove(); return; }
+    requestAnimationFrame(function () { bar.style.transition = 'width 2.6s linear'; bar.style.width = '100%'; });
+    setTimeout(function () {
+      splash.classList.add('out');
+      sessionStorage.setItem('sentinel_entered', '1');
+      setTimeout(function () { splash.remove(); }, 650);
+    }, 2800);
+  })();
+
+  // Threshold sliders: live value display
+  ['conf', 'objconf'].forEach(id => {
+    const s = document.getElementById(id), v = document.getElementById(id + 'Val');
+    const upd = () => v.textContent = parseFloat(s.value).toFixed(2);
+    s.addEventListener('input', upd); upd();
+  });
+
+  const drop = document.getElementById('drop');
+  const fileInput = document.getElementById('fileInput');
+  const fileName = document.getElementById('fileName');
+  const goBtn = document.getElementById('goBtn');
+  const progCard = document.getElementById('progCard');
+  const resultCard = document.getElementById('resultCard');
+  const uploadCard = document.getElementById('uploadCard');
+  const barFill = document.getElementById('barFill');
+  const statusText = document.getElementById('statusText');
+  const player = document.getElementById('player');
+  const dlLink = document.getElementById('dlLink');
+  let chosenFile = null;
+
+  drop.addEventListener('click', () => fileInput.click());
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault(); drop.classList.remove('over');
+    if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => { if (fileInput.files.length) setFile(fileInput.files[0]); });
+
+  function setFile(f) {
+    chosenFile = f;
+    fileName.textContent = f.name + '  (' + (f.size / 1048576).toFixed(1) + ' MB)';
+    goBtn.disabled = false;
+  }
+
+  goBtn.addEventListener('click', async () => {
+    if (!chosenFile) return;
+    goBtn.disabled = true;
+    const fd = new FormData();
+    fd.append('video', chosenFile);
+    fd.append('weights', document.getElementById('weights').value);
+    fd.append('every', document.getElementById('every').value);
+    fd.append('object', document.getElementById('objMode').value);
+    fd.append('conf', document.getElementById('conf').value);
+    fd.append('objconf', document.getElementById('objconf').value);
+
+    progCard.classList.remove('hidden');
+    resultCard.classList.add('hidden');
+    setBar(3, 'Uploading');
+
+    let res;
+    try { res = await (await fetch('/upload', { method: 'POST', body: fd })).json(); }
+    catch (e) { return fail('Upload failed'); }
+    if (res.error) return fail(res.error);
+    poll(res.job_id);
+  });
+
+  function poll(jobId) {
+    const t = setInterval(async () => {
+      let j;
+      try { j = await (await fetch('/status/' + jobId)).json(); } catch (e) { return; }
+      if (j.status === 'processing') setBar(j.progress, 'Detecting activities  ' + j.progress + '%');
+      else if (j.status === 'transcoding') setBar(j.progress, 'Preparing video');
+      else if (j.status === 'queued') setBar(2, 'Queued');
+      else if (j.status === 'done') { clearInterval(t); setBar(100, 'Complete'); showResult(jobId); }
+      else if (j.status === 'error') { clearInterval(t); fail(j.error || 'Processing failed'); }
+    }, 800);
+  }
+
+  function showResult(jobId) {
+    const url = '/video/' + jobId + '?t=' + Date.now();
+    player.src = url;
+    dlLink.href = url;
+    progCard.classList.add('hidden');
+    resultCard.classList.remove('hidden');
+    player.load();
+    resultCard.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function setBar(pct, msg) { barFill.style.width = pct + '%'; statusText.textContent = msg; statusText.classList.remove('err'); }
+  function fail(msg) { setBar(100, msg); statusText.classList.add('err'); barFill.style.background = 'var(--danger)'; goBtn.disabled = false; }
+
+  document.getElementById('againLink').addEventListener('click', (e) => {
+    e.preventDefault();
+    resultCard.classList.add('hidden'); progCard.classList.add('hidden');
+    barFill.style.background = ''; goBtn.disabled = false;
+    uploadCard.scrollIntoView({ behavior: 'smooth' });
+  });
+</script>
+</body>
+</html>

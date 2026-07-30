@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SENITAL AI — Live Camera</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="wrap">
+  <div class="app-header">
+    <div class="app-brand">
+      <h1 class="app-title">SENITAL <span>AI</span></h1>
+      <div class="app-tag">Live Camera</div>
+    </div>
+    <div class="links" style="margin:0">
+      <a class="nav-link" href="/">Video Upload</a>
+      <a class="nav-link" href="/network">Network Camera</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section">Camera</div>
+    <div class="controls">
+      <div class="field">
+        <span class="lbl">Detection model</span>
+        <select id="weights">
+          <option value="rtmpose" selected>Balanced (fast)</option>
+          <option value="rtmpose-acc">Accurate</option>
+        </select>
+      </div>
+      <div class="field">
+        <span class="lbl">Camera</span>
+        <select id="camSelect" style="min-width:240px"><option>Detecting</option></select>
+      </div>
+      <div class="field">
+        <span class="lbl">Detection mode</span>
+        <select id="objMode">
+          <option value="0" selected>Pose only (no object needed)</option>
+          <option value="1">Require object in hand</option>
+        </select>
+      </div>
+      <div class="field">
+        <span class="lbl">Detection accuracy <b id="confVal">0.40</b></span>
+        <input type="range" id="conf" min="0.05" max="0.95" step="0.05" value="0.40">
+      </div>
+      <div class="field">
+        <span class="lbl">Object threshold <b id="objconfVal">0.15</b></span>
+        <input type="range" id="objconf" min="0.05" max="0.80" step="0.05" value="0.15">
+      </div>
+      <button class="btn btn-primary" id="startBtn">Start camera</button>
+      <button class="btn btn-ghost" id="stopBtn" disabled>Stop</button>
+    </div>
+
+    <div class="stage" id="stage" style="margin-top:20px">
+      <div class="placeholder" id="placeholder">Camera is inactive</div>
+      <div class="badge idle" id="badge">Standby</div>
+      <div class="fps" id="fps"></div>
+      <img id="result" alt="processed feed">
+    </div>
+
+    <div class="legend">
+      <span><i class="dot" style="background:#dc2828"></i> Using phone</span>
+      <span><i class="dot" style="background:#f0783c"></i> Taking picture</span>
+      <span><i class="dot" style="background:#c83cc8"></i> Placing object</span>
+      <span><i class="dot" style="background:#3cb44b"></i> Person</span>
+      <span><i class="dot" style="background:#ffd700"></i> Detected object</span>
+    </div>
+  </div>
+</div>
+
+<video id="cam" autoplay playsinline muted class="hidden"></video>
+<canvas id="canvas" class="hidden"></canvas>
+
+<script>
+  const weightsSel = document.getElementById('weights');
+  const camSelect = document.getElementById('camSelect');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const placeholder = document.getElementById('placeholder');
+  const badge = document.getElementById('badge');
+  const fpsEl = document.getElementById('fps');
+  const resultImg = document.getElementById('result');
+  const cam = document.getElementById('cam');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  let stream = null, running = false, lastAlertTs = 0;
+  let frames = 0, fpsT0 = 0;
+
+  async function loadCameras(selectedId) {
+    let devices = [];
+    try { devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput'); } catch (e) {}
+    camSelect.innerHTML = '';
+    if (!devices.length) { camSelect.add(new Option('Default camera', '')); return; }
+    devices.forEach((d, i) => camSelect.add(new Option(d.label || ('Camera ' + (i + 1)), d.deviceId)));
+    if (selectedId) camSelect.value = selectedId;
+  }
+  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener)
+    navigator.mediaDevices.addEventListener('devicechange', () => loadCameras(camSelect.value));
+  loadCameras();
+
+  // Threshold sliders: live value display
+  ['conf', 'objconf'].forEach(id => {
+    const s = document.getElementById(id), v = document.getElementById(id + 'Val');
+    const upd = () => v.textContent = parseFloat(s.value).toFixed(2);
+    s.addEventListener('input', upd); upd();
+  });
+
+  // Web Audio siren
+  let audioCtx = null, osc = null, lfoOsc = null, sirenOn = false;
+  function startSiren() {
+    if (sirenOn) return;
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    osc = audioCtx.createOscillator(); osc.type = 'sawtooth'; osc.frequency.value = 800;
+    const gain = audioCtx.createGain(); gain.gain.value = 0.15;
+    lfoOsc = audioCtx.createOscillator(); lfoOsc.frequency.value = 4;
+    const lfoGain = audioCtx.createGain(); lfoGain.gain.value = 220;
+    lfoOsc.connect(lfoGain); lfoGain.connect(osc.frequency);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); lfoOsc.start(); sirenOn = true;
+  }
+  function stopSiren() { if (!sirenOn) return; try { osc.stop(); lfoOsc.stop(); } catch (e) {} sirenOn = false; }
+
+  startBtn.addEventListener('click', async () => {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    audioCtx.resume();
+    const devId = camSelect.value;
+    const constraints = { audio: false, video: devId ? { deviceId: { exact: devId } } : true };
+    try { stream = await navigator.mediaDevices.getUserMedia(constraints); }
+    catch (e) { placeholder.textContent = 'Camera unavailable: ' + e.message; return; }
+    cam.srcObject = stream;
+    await cam.play();
+    await loadCameras(devId);
+    placeholder.style.display = 'none';
+    resultImg.style.display = 'block';
+    badge.className = 'badge idle'; badge.textContent = 'Live';
+    fpsEl.style.display = 'block'; fpsEl.textContent = '0.0 fps';
+    startBtn.disabled = true; stopBtn.disabled = false;
+    running = true; frames = 0; fpsT0 = performance.now();
+    loop();
+  });
+
+  stopBtn.addEventListener('click', stop);
+  function stop() {
+    running = false;
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null;
+    resultImg.style.display = 'none';
+    placeholder.style.display = 'block';
+    placeholder.textContent = 'Camera is inactive';
+    badge.style.display = 'none'; fpsEl.style.display = 'none';
+    startBtn.disabled = false; stopBtn.disabled = true;
+    stopSiren();
+  }
+
+  async function loop() {
+    if (!running) return;
+    const w = cam.videoWidth, h = cam.videoHeight;
+    if (!w || !h) { requestAnimationFrame(loop); return; }
+    canvas.width = w; canvas.height = h;
+    ctx.drawImage(cam, 0, 0, w, h);
+
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.7));
+    const fd = new FormData();
+    fd.append('frame', blob, 'f.jpg');
+    fd.append('weights', weightsSel.value);
+    fd.append('object', document.getElementById('objMode').value);
+    fd.append('conf', document.getElementById('conf').value);
+    fd.append('objconf', document.getElementById('objconf').value);
+
+    try {
+      const res = await fetch('/process_frame', { method: 'POST', body: fd });
+      if (res.ok) {
+        const alert = res.headers.get('X-Alert') === '1';
+        const labels = res.headers.get('X-Labels') || '';
+        const outBlob = await res.blob();
+        const old = resultImg.dataset.url;
+        resultImg.src = URL.createObjectURL(outBlob);
+        if (old) URL.revokeObjectURL(old);
+        resultImg.dataset.url = resultImg.src;
+
+        const now = performance.now();
+        if (alert) lastAlertTs = now;
+        const alertActive = (now - lastAlertTs) <= 1000;
+        if (alertActive) { badge.className = 'badge on'; badge.textContent = 'Alert: ' + labels; startSiren(); }
+        else { badge.className = 'badge idle'; badge.textContent = 'Live'; stopSiren(); }
+
+        frames++;
+        if (now - fpsT0 >= 1000) { fpsEl.textContent = (frames * 1000 / (now - fpsT0)).toFixed(1) + ' fps'; frames = 0; fpsT0 = now; }
+      }
+    } catch (e) { /* transient */ }
+
+    if (running) requestAnimationFrame(loop);
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SENITAL AI — Network Camera</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .grid .field input, .grid .field select { min-width: 0; width: 100%; }
+  .grid .field { width: 100%; }
+  .form-input {
+    background: var(--panel-2); color: var(--text);
+    border: 1.5px solid var(--accent-soft); border-radius: 9px;
+    padding: 10px 12px; font-size: 14px; width: 100%; outline: none;
+    transition: border-color .15s ease;
+  }
+  .form-input:hover, .form-input:focus { border-color: var(--accent); }
+  .scan-list { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .scan-item {
+    border: 1px solid var(--line); background: var(--panel-2); border-radius: 9px;
+    padding: 10px 12px; font-size: 13px; color: var(--text); cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .scan-item:hover { border-color: var(--accent); }
+  .scan-item .ip { color: var(--accent); font-weight: 700; letter-spacing: .04em; }
+  .btnrow { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 20px; }
+
+  .section-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .help-toggle {
+    display: flex; gap: 8px; flex-wrap: wrap;
+  }
+  .guide { display: none; margin-top: 16px; }
+  .guide.open { display: block; }
+  .guide-panel {
+    border: 1px solid var(--line); background: var(--panel-2);
+    border-radius: 10px; padding: 18px 20px;
+  }
+  .guide-panel h3 {
+    color: var(--accent); font-size: 13px; letter-spacing: .06em;
+    text-transform: uppercase; margin: 0 0 8px;
+  }
+  .guide-panel h3:not(:first-child) { margin-top: 22px; }
+  .guide-panel ol, .guide-panel ul { margin: 0; padding-left: 20px; }
+  .guide-panel li { color: var(--text); font-size: 13.5px; line-height: 1.7; }
+  .guide-panel li + li { margin-top: 4px; }
+  .guide-panel code {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 6px; font-size: 12.5px; color: var(--accent);
+  }
+  .guide-panel .muted { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="app-header">
+    <div class="app-brand">
+      <h1 class="app-title">SENITAL <span>AI</span></h1>
+      <div class="app-tag">Network Camera</div>
+    </div>
+    <a class="nav-link" href="/live">Webcam</a>
+  </div>
+
+  <div class="card">
+    <div class="section-row">
+      <div class="section" style="margin:0">Camera connection</div>
+      <div class="help-toggle">
+        <button class="btn btn-ghost" id="prereqBtn">Before you start</button>
+        <button class="btn btn-ghost" id="guideBtn">Setup guide</button>
+      </div>
+    </div>
+
+    <div class="guide" id="prereqGuide">
+      <div class="guide-panel">
+        <h3>Before you configure a camera</h3>
+        <ul>
+          <li>An IP camera that supports <b>RTSP</b> or <b>ONVIF</b> (most modern IP / PoE cameras do).</li>
+          <li>An <b>Ethernet cable</b> from the camera to the laptop, or both on the same switch / router.</li>
+          <li>Power to the camera — either a PoE switch/injector, or the camera's own power adapter.</li>
+          <li>The camera's <b>login</b> (username and password) set in the camera's own app or web page.</li>
+          <li>The camera and laptop must be on the <b>same subnet</b> (see the setup guide for how to set this).</li>
+          <li>Know whether the camera uses <b>RTSP</b> (port 554) or <b>HTTP/MJPEG</b> (port 80) — or leave Protocol on <b>Auto detect</b>.</li>
+        </ul>
+        <div class="muted">If the camera is already installed on your network with a known IP and login, you can skip straight to the form and press Test connection.</div>
+      </div>
+    </div>
+
+    <div class="guide" id="setupGuide">
+      <div class="guide-panel">
+        <h3>1. Connect the Ethernet cable</h3>
+        <ol>
+          <li>Plug one end of the Ethernet cable into the camera's <b>LAN / network port</b>.</li>
+          <li>Plug the other end into the laptop's Ethernet port (or into a switch / router both devices share).</li>
+          <li>Power the camera on. Wait about 30 seconds for it to boot.</li>
+          <li>If using a direct laptop-to-camera cable with no router, a link light on the port confirms the physical connection.</li>
+        </ol>
+
+        <h3>2. Put the laptop and camera on the same subnet</h3>
+        <ol>
+          <li>Most cameras ship with a default IP such as <code>192.168.1.64</code> (Hikvision) or <code>192.168.1.108</code> (Dahua) — check the camera's manual or label.</li>
+          <li>On the laptop open <b>Settings &gt; Network &amp; internet &gt; Ethernet &gt; IP assignment &gt; Edit</b>.</li>
+          <li>Choose <b>Manual</b>, turn on IPv4, and set an IP in the <b>same range</b> as the camera, for example <code>192.168.1.10</code>.</li>
+          <li>Set Subnet mask to <code>255.255.255.0</code>. Leave Gateway blank for a direct connection.</li>
+          <li>Save. The laptop and camera can now talk to each other.</li>
+        </ol>
+        <div class="muted">If a router / DHCP is in charge, both devices get their IPs automatically — skip the manual step and just find the camera's assigned IP below.</div>
+
+        <h3>3. Find the camera's IP address</h3>
+        <ol>
+          <li>Easiest: press <b>Scan network</b> below — it auto-discovers ONVIF cameras on your LAN and lets you click one to fill the IP.</li>
+          <li>Or read the IP from the camera vendor's tool (Hikvision SADP, Dahua ConfigTool, Reolink app, etc.).</li>
+          <li>Or check the router's client list for the camera's IP.</li>
+        </ol>
+
+        <h3>4. Configure the connection here</h3>
+        <ol>
+          <li>Enter the camera's <b>IP address</b> and its <b>username / password</b>.</li>
+          <li>Leave <b>Port</b>, <b>Protocol</b>, and <b>Stream path</b> as-is for Auto detect, or set them if you know them.</li>
+          <li>Advanced: paste a complete <b>Full stream URL</b> (e.g. <code>rtsp://user:pass@192.168.1.64:554/Streaming/Channels/101</code>) to override every other field.</li>
+          <li>Press <b>Test connection</b>. On success a preview frame appears — then press <b>Start detection</b>.</li>
+        </ol>
+        <div class="muted">If Test fails, confirm the camera is powered, both devices ping each other, and the login is correct. RTSP uses port 554; HTTP/MJPEG uses port 80.</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="field">
+        <span class="lbl">IP address</span>
+        <input class="form-input" id="ip" placeholder="192.168.1.64">
+      </div>
+      <div class="field">
+        <span class="lbl">Port (optional)</span>
+        <input class="form-input" id="port" placeholder="RTSP 554 / HTTP 80">
+      </div>
+      <div class="field">
+        <span class="lbl">Username</span>
+        <input class="form-input" id="user" placeholder="admin">
+      </div>
+      <div class="field">
+        <span class="lbl">Password</span>
+        <input class="form-input" id="password" type="password" placeholder="">
+      </div>
+      <div class="field">
+        <span class="lbl">Protocol</span>
+        <select id="protocol">
+          <option value="auto" selected>Auto detect</option>
+          <option value="rtsp">RTSP</option>
+          <option value="http">HTTP / MJPEG</option>
+        </select>
+      </div>
+      <div class="field">
+        <span class="lbl">Stream path (optional)</span>
+        <input class="form-input" id="path" placeholder="leave blank to auto detect">
+      </div>
+      <div class="field" style="grid-column: 1 / -1">
+        <span class="lbl">Full stream URL (optional, overrides the fields above)</span>
+        <input class="form-input" id="url" placeholder="rtsp://user:pass@192.168.1.64:554/stream">
+      </div>
+    </div>
+
+    <div class="btnrow">
+      <button class="btn btn-ghost" id="scanBtn">Scan network</button>
+      <button class="btn btn-ghost" id="testBtn">Test connection</button>
+      <button class="btn btn-primary" id="startBtn" disabled>Start detection</button>
+      <button class="btn btn-ghost" id="stopBtn" disabled>Stop</button>
+    </div>
+    <div class="status" id="testStatus"></div>
+    <div class="scan-list" id="scanList"></div>
+  </div>
+
+  <div class="card">
+    <div class="section">Detection</div>
+    <div class="controls">
+      <div class="field">
+        <span class="lbl">Detection model</span>
+        <select id="weights">
+          <option value="rtmpose" selected>Balanced (fast)</option>
+          <option value="rtmpose-acc">Accurate</option>
+        </select>
+      </div>
+      <div class="field">
+        <span class="lbl">Detection mode</span>
+        <select id="objMode">
+          <option value="0" selected>Pose only (no object needed)</option>
+          <option value="1">Require object in hand</option>
+        </select>
+      </div>
+      <div class="field">
+        <span class="lbl">Detection accuracy <b id="confVal">0.40</b></span>
+        <input type="range" id="conf" min="0.05" max="0.95" step="0.05" value="0.40">
+      </div>
+      <div class="field">
+        <span class="lbl">Object threshold <b id="objconfVal">0.15</b></span>
+        <input type="range" id="objconf" min="0.05" max="0.80" step="0.05" value="0.15">
+      </div>
+    </div>
+
+    <div class="stage" id="stage" style="margin-top:20px">
+      <div class="placeholder" id="placeholder">Connect a camera and start detection</div>
+      <div class="badge idle" id="badge">Standby</div>
+      <div class="fps" id="fps"></div>
+      <img id="stream" alt="camera feed">
+    </div>
+
+    <div class="legend">
+      <span><i class="dot" style="background:#dc2828"></i> Using phone</span>
+      <span><i class="dot" style="background:#f0783c"></i> Taking picture</span>
+      <span><i class="dot" style="background:#c83cc8"></i> Placing object</span>
+      <span><i class="dot" style="background:#3cb44b"></i> Person</span>
+      <span><i class="dot" style="background:#ffd700"></i> Detected object</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const fields = ['ip', 'port', 'user', 'password', 'protocol', 'path', 'url'];
+  const testStatus = $('testStatus'), scanList = $('scanList');
+  const stage = $('stage'), placeholder = $('placeholder'), stream = $('stream');
+  const badge = $('badge'), fpsEl = $('fps');
+  const startBtn = $('startBtn'), stopBtn = $('stopBtn'), testBtn = $('testBtn'), scanBtn = $('scanBtn');
+  let statusTimer = null;
+
+  // Collapsible help panels
+  function bindToggle(btnId, panelId, openLabel, closeLabel) {
+    const btn = $(btnId), panel = $(panelId);
+    btn.addEventListener('click', () => {
+      const open = panel.classList.toggle('open');
+      btn.textContent = open ? closeLabel : openLabel;
+      if (open) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  }
+  bindToggle('prereqBtn', 'prereqGuide', 'Before you start', 'Hide');
+  bindToggle('guideBtn', 'setupGuide', 'Setup guide', 'Hide guide');
+
+  // Threshold sliders: live value display
+  ['conf', 'objconf'].forEach(id => {
+    const s = $(id), v = $(id + 'Val');
+    const upd = () => v.textContent = parseFloat(s.value).toFixed(2);
+    s.addEventListener('input', upd); upd();
+  });
+
+  function formData() {
+    const fd = new FormData();
+    fields.forEach(f => fd.append(f, $(f).value.trim()));
+    return fd;
+  }
+
+  scanBtn.addEventListener('click', async () => {
+    scanBtn.disabled = true; scanBtn.textContent = 'Scanning';
+    scanList.innerHTML = '';
+    try {
+      const list = (await (await fetch('/net_scan')).json()).cameras || [];
+      if (!list.length) { testStatus.textContent = 'No ONVIF cameras found on the network.'; }
+      else {
+        testStatus.textContent = '';
+        list.forEach(c => {
+          const el = document.createElement('div');
+          el.className = 'scan-item';
+          el.innerHTML = '<span class="ip">' + c.ip + '</span><span>' + (c.name || '') + '  —  use</span>';
+          el.addEventListener('click', () => { $('ip').value = c.ip; testStatus.textContent = 'Filled IP ' + c.ip + '. Enter login and Test connection.'; });
+          scanList.appendChild(el);
+        });
+      }
+    } catch (e) { testStatus.textContent = 'Scan failed.'; }
+    scanBtn.disabled = false; scanBtn.textContent = 'Scan network';
+  });
+
+  testBtn.addEventListener('click', async () => {
+    testBtn.disabled = true; testStatus.classList.remove('err');
+    testStatus.textContent = 'Connecting';
+    try {
+      const r = await (await fetch('/net_test', { method: 'POST', body: formData() })).json();
+      if (r.ok) {
+        testStatus.textContent = 'Connected: ' + r.url;
+        placeholder.style.display = 'none';
+        stream.style.display = 'block'; stream.src = r.preview;
+        startBtn.disabled = false;
+      } else {
+        testStatus.classList.add('err'); testStatus.textContent = r.error || 'Connection failed.';
+      }
+    } catch (e) { testStatus.classList.add('err'); testStatus.textContent = 'Connection failed.'; }
+    testBtn.disabled = false;
+  });
+
+  // Web Audio siren
+  let audioCtx = null, osc = null, lfoOsc = null, sirenOn = false;
+  function startSiren() {
+    if (sirenOn) return;
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    osc = audioCtx.createOscillator(); osc.type = 'sawtooth'; osc.frequency.value = 800;
+    const gain = audioCtx.createGain(); gain.gain.value = 0.15;
+    lfoOsc = audioCtx.createOscillator(); lfoOsc.frequency.value = 4;
+    const lfoGain = audioCtx.createGain(); lfoGain.gain.value = 220;
+    lfoOsc.connect(lfoGain); lfoGain.connect(osc.frequency);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); lfoOsc.start(); sirenOn = true;
+  }
+  function stopSiren() { if (!sirenOn) return; try { osc.stop(); lfoOsc.stop(); } catch (e) {} sirenOn = false; }
+
+  startBtn.addEventListener('click', () => {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    audioCtx.resume();
+    const w = $('weights').value;
+    const obj = $('objMode').value;
+    const conf = $('conf').value, objconf = $('objconf').value;
+    stream.src = '/net_stream?weights=' + encodeURIComponent(w) +
+      '&object=' + obj + '&conf=' + conf + '&objconf=' + objconf + '&t=' + Date.now();
+    stream.style.display = 'block'; placeholder.style.display = 'none';
+    badge.className = 'badge idle'; badge.textContent = 'Live';
+    fpsEl.style.display = 'block'; fpsEl.textContent = '0.0 fps';
+    startBtn.disabled = true; stopBtn.disabled = false;
+    stream.onerror = () => { testStatus.classList.add('err'); testStatus.textContent = 'Stream ended or camera unreachable.'; stopStream(); };
+    statusTimer = setInterval(pollStatus, 350);
+  });
+
+  stopBtn.addEventListener('click', stopStream);
+  function stopStream() {
+    stream.src = ''; stream.style.display = 'none';
+    placeholder.style.display = 'block';
+    badge.style.display = 'none'; fpsEl.style.display = 'none';
+    startBtn.disabled = false; stopBtn.disabled = true;
+    clearInterval(statusTimer); stopSiren();
+  }
+
+  async function pollStatus() {
+    let j;
+    try { j = await (await fetch('/live_status')).json(); } catch (e) { return; }
+    fpsEl.textContent = (j.fps || 0).toFixed(1) + ' fps';
+    if (j.alert) { badge.className = 'badge on'; badge.textContent = 'Alert: ' + (j.labels || []).join(', '); startSiren(); }
+    else { badge.className = 'badge idle'; badge.textContent = 'Live'; stopSiren(); }
+  }
+</script>
+</body>
+</html>
